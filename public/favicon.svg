@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="50%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#4c1d95"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="32" height="32" rx="7" fill="url(#bg)"/>
+  <!-- Glow ring -->
+  <circle cx="16" cy="15" r="10" fill="none" stroke="url(#accent)" stroke-width="1.5" opacity="0.5"/>
+  <!-- Brain/mind symbol - stylized neural node -->
+  <circle cx="16" cy="12" r="3" fill="url(#accent)"/>
+  <circle cx="10" cy="18" r="2" fill="#a78bfa" opacity="0.8"/>
+  <circle cx="22" cy="18" r="2" fill="#f59e0b" opacity="0.8"/>
+  <circle cx="16" cy="22" r="1.5" fill="#c084fc" opacity="0.7"/>
+  <!-- Neural connections -->
+  <line x1="16" y1="15" x2="10" y2="18" stroke="#a78bfa" stroke-width="0.8" opacity="0.6"/>
+  <line x1="16" y1="15" x2="22" y2="18" stroke="#f59e0b" stroke-width="0.8" opacity="0.6"/>
+  <line x1="10" y1="18" x2="16" y2="22" stroke="#c084fc" stroke-width="0.6" opacity="0.5"/>
+  <line x1="22" y1="18" x2="16" y2="22" stroke="#c084fc" stroke-width="0.6" opacity="0.5"/>
+  <!-- Small sparkle -->
+  <circle cx="19" cy="10" r="0.7" fill="#fbbf24"/>
+</svg>

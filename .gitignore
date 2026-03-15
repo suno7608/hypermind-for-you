@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.env.local
+data/
+.DS_Store
+*.log
+docs/.bkit-memory.json
+docs/.pdca-status.json
+node_modules/
+.next/
+.vercel/
+*.db
+.DS_Store
