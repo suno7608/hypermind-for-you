@@ -3,6 +3,10 @@ import { AGENTS } from "@/lib/agents";
 import { createAnthropicClient } from "@/lib/anthropic";
 import { resolveModel } from "@/lib/runtime-config";
 
+// Edge Runtime: streaming responses are not subject to the 60s Hobby timeout
+// Only requires first byte within 25s (Anthropic typically responds in <5s)
+export const runtime = "edge";
+
 function truncate(text: string, maxChars: number = 12000): string {
   if (text.length <= maxChars) return text;
   const half = Math.floor(maxChars / 2);

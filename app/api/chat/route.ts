@@ -3,6 +3,8 @@ import { AGENTS } from "@/lib/agents";
 import { createAnthropicClient } from "@/lib/anthropic";
 import { resolveModel } from "@/lib/runtime-config";
 
+export const runtime = "edge";
+
 const REVIEW_CONTEXT = `
 ## Hypermind for You 서비스 맥락
 이 서비스는 팀원의 발표 자료, 보고서, 사업 고민을 점검하기 위한 리뷰 워크스페이스입니다.
