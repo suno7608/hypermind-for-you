@@ -140,6 +140,9 @@ export function downloadSingleAgent(agentId: string, content: string, topic?: st
 export function downloadFullDebate(topic: string, agents: { agent: string; content: string }[]) {
   const date = new Date().toISOString().slice(0, 10);
 
+  // Extract short title from topic (first line only, exclude prompt/attachment details)
+  const shortTopic = topic.split("\n")[0].replace(/^[-\s]+/, "").trim().slice(0, 80) || "Council 검증";
+
   let sections = "";
   for (const a of agents) {
     const meta = AGENT_META[a.agent] || { icon: "?", name: a.agent, role: "" };
@@ -157,11 +160,11 @@ export function downloadFullDebate(topic: string, agents: { agent: string; conte
   const body = `
     <div class="header">
       <h1>🏛️ Hypermind for You Council 최종 검증 보고서</h1>
-      <div class="meta">주제: ${topic} · ${date}</div>
+      <div class="meta">주제: ${shortTopic} · ${date}</div>
     </div>
     ${sections}`;
 
-  const safeTopic = topic.slice(0, 20).replace(/[\\/:*?"<>|\n\r]/g, "").trim() || "debate";
+  const safeTopic = shortTopic.slice(0, 20).replace(/[\\/:*?"<>|\n\r]/g, "").trim() || "debate";
   downloadHtml(`${date}_HypermindForYou_Council_${safeTopic}.html`, wrapHtml("Hypermind for You Council 최종 검증 보고서", body));
 }
 
