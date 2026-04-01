@@ -5,6 +5,7 @@ import { AGENTS } from "@/lib/agents";
 import { WORKFLOWS } from "@/lib/review-options";
 import Footer from "./Footer";
 import { usePinContext } from "./PinGate";
+import TutorialModal from "./TutorialModal";
 
 const DIRECT_REVIEW_AGENTS = AGENTS.filter((agent) => agent.id !== "arbiter");
 
@@ -30,6 +31,7 @@ export default function HypermindLanding() {
   const { isAdmin } = usePinContext();
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
+      <TutorialModal />
       <div className="mx-auto flex max-w-7xl flex-col gap-8 px-6 py-8">
         <nav className="surface-panel flex items-center justify-between px-5 py-4">
           <div className="flex items-center gap-3">

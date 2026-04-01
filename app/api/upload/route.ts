@@ -1,5 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
+import * as CFB from "cfb";
+
+/** 구형 .ppt (OLE2/Compound Binary) 텍스트 추출 */
+function extractPptText(buffer: Buffer): string {
+  try {
+    const cfb = CFB.read(buffer, { type: "buffer" });
+    // PowerPoint Document 스트림에서 UTF-16LE 텍스트 추출
+    const entry =
+      CFB.find(cfb, "/PowerPoint Document") ||
+      CFB.find(cfb, "PowerPoint Document");
+    if (!entry || !entry.content) return "";
+
+    const raw = Buffer.from(entry.content);
+    const texts: string[] = [];
+
+    // TextBytesAtom (type=0x0FA8) 또는 TextCharsAtom (type=0x0FA0) 파싱
+    let i = 0;
+    while (i < raw.length - 8) {
+      const recType = raw.readUInt16LE(i + 2);
+      const recLen = raw.readUInt32LE(i + 4);
+
+      if (recType === 0x0fa0 && recLen > 0 && recLen < 100000) {
+        // TextCharsAtom — UTF-16LE
+        const end = Math.min(i + 8 + recLen, raw.length);
+        const str = raw.subarray(i + 8, end).toString("utf16le").trim();
+        if (str && !/^[\x00-\x1F]+$/.test(str)) texts.push(str);
+      } else if (recType === 0x0fa8 && recLen > 0 && recLen < 100000) {
+        // TextBytesAtom — Latin1
+        const end = Math.min(i + 8 + recLen, raw.length);
+        const str = raw.subarray(i + 8, end).toString("latin1").trim();
+        if (str && !/^[\x00-\x1F]+$/.test(str)) texts.push(str);
+      }
+
+      i += 8 + recLen;
+      if (recLen === 0) i += 1; // prevent infinite loop
+    }
+
+    return texts.join("\n\n");
+  } catch {
+    return "";
+  }
+}
 
 async function extractPptxText(buffer: Buffer): Promise<string> {
   const zip = await JSZip.loadAsync(buffer);
@@ -64,8 +106,16 @@ export async function POST(req: NextRequest) {
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ buffer });
       text = result.value;
-    } else if (name.endsWith(".pptx") || name.endsWith(".ppt")) {
+    } else if (name.endsWith(".pptx")) {
       text = await extractPptxText(buffer);
+    } else if (name.endsWith(".ppt")) {
+      text = extractPptText(buffer);
+      if (!text.trim()) {
+        return NextResponse.json(
+          { error: "구형 PPT 파일에서 텍스트를 추출할 수 없습니다. PPTX로 변환 후 다시 시도해주세요.\n\n변환 방법: PowerPoint에서 열기 → 다른 이름으로 저장 → .pptx 선택" },
+          { status: 400 }
+        );
+      }
     } else {
       return NextResponse.json(
         { error: `지원하지 않는 형식입니다: ${name.split(".").pop()}\n지원: PDF, DOCX, PPTX, TXT, MD, CSV` },
