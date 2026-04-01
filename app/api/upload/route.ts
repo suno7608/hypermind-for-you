@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
 
     let text = "";
 
-    if (name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".csv")) {
+    if (name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".csv") || name.endsWith(".html") || name.endsWith(".htm")) {
       text = buffer.toString("utf-8");
     } else if (name.endsWith(".pdf")) {
       try {
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
       }
     } else {
       return NextResponse.json(
-        { error: `지원하지 않는 형식입니다: ${name.split(".").pop()}\n지원: PDF, DOCX, PPTX, TXT, MD, CSV` },
+        { error: `지원하지 않는 형식입니다: ${name.split(".").pop()}\n지원: PDF, DOCX, PPTX, TXT, MD, CSV, HTML` },
         { status: 400 }
       );
     }
