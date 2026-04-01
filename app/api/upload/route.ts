@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 import * as CFB from "cfb";
 
+// Next.js App Router: body size limit 확장 + 타임아웃
+export const maxDuration = 30;
+export const dynamic = "force-dynamic";
+
 /** 구형 .ppt (OLE2/Compound Binary) 텍스트 추출 */
 function extractPptText(buffer: Buffer): string {
   try {
@@ -81,9 +85,9 @@ export async function POST(req: NextRequest) {
     const name = file.name.toLowerCase();
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+    const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB
     if (buffer.length > MAX_FILE_SIZE) {
-      return NextResponse.json({ error: '파일 크기가 25MB를 초과합니다.' }, { status: 400 });
+      return NextResponse.json({ error: '파일 크기가 4MB를 초과합니다.' }, { status: 400 });
     }
 
     let text = "";

@@ -25,8 +25,8 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 25 * 1024 * 1024) {
-      alert('파일 크기가 25MB를 초과합니다. 더 작은 파일을 선택해주세요.');
+    if (file.size > 4 * 1024 * 1024) {
+      alert('파일 크기가 4MB를 초과합니다. 더 작은 파일을 선택해주세요.');
       if (fileRef.current) fileRef.current.value = '';
       return;
     }
