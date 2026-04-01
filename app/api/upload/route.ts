@@ -38,16 +38,28 @@ export async function POST(req: NextRequest) {
 
     const name = file.name.toLowerCase();
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+    if (buffer.length > MAX_FILE_SIZE) {
+      return NextResponse.json({ error: '파일 크기가 25MB를 초과합니다.' }, { status: 400 });
+    }
+
     let text = "";
 
     if (name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".csv")) {
       text = buffer.toString("utf-8");
     } else if (name.endsWith(".pdf")) {
-      // pdf-parse v1 is CommonJS — use require
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require("pdf-parse");
-      const result = await pdfParse(buffer);
-      text = result.text;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pdfParse = require("pdf-parse");
+        const result = await pdfParse(buffer);
+        text = result.text;
+      } catch (pdfErr) {
+        return NextResponse.json(
+          { error: 'PDF 파일을 읽을 수 없습니다. 파일이 손상되었거나 암호로 보호되어 있을 수 있습니다.' },
+          { status: 400 }
+        );
+      }
     } else if (name.endsWith(".docx")) {
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ buffer });
@@ -73,6 +85,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ text, filename: file.name, chars: text.length });
   } catch (err) {
     console.error("Upload error:", err);
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    const message = err instanceof SyntaxError
+      ? '파일 형식을 처리할 수 없습니다. 다른 형식으로 변환 후 다시 시도해주세요.'
+      : err instanceof TypeError
+        ? '파일 처리 중 오류가 발생했습니다. 파일이 손상되었을 수 있습니다.'
+        : '파일 업로드 중 서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

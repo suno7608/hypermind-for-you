@@ -25,11 +25,23 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 25 * 1024 * 1024) {
+      alert('파일 크기가 25MB를 초과합니다. 더 작은 파일을 선택해주세요.');
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
+
     setUploading(true);
     try {
       const form = new FormData();
       form.append("file", file);
       const res = await fetch("/api/upload", { method: "POST", body: form });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await res.text();
+        alert('서버 오류가 발생했습니다. 파일 형식을 확인하거나 다시 시도해주세요.\n\n' + text.slice(0, 200));
+        return;
+      }
       const data = await res.json();
       if (!res.ok) {
         alert(data.error || "파일 업로드 실패");
@@ -37,7 +49,7 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
       }
       setAttachedFile({ name: data.filename, text: data.text });
     } catch (err) {
-      alert("파일 업로드 중 오류: " + err);
+      alert('파일 업로드 중 오류가 발생했습니다.\n\n가능한 원인:\n• 파일이 손상되었거나 암호로 보호됨\n• 파일 크기가 너무 큼\n• 네트워크 연결 문제\n\n다른 파일로 다시 시도해주세요.');
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
