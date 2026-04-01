@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useDebateStore } from "@/lib/store";
+import { extractTextFromFile } from "@/lib/file-extract";
 
 const AGENT_ORDER = ["omega", "psi", "arbiter", "delta"];
 
@@ -20,33 +21,14 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 4 * 1024 * 1024) {
-      setError('파일 크기가 4MB를 초과합니다. 더 작은 파일을 선택해주세요.');
-      if (fileRef.current) fileRef.current.value = '';
-      return;
-    }
-
     setUploading(true);
     setError(null);
 
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: form });
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const text = await res.text();
-        setError('서버 오류가 발생했습니다. 파일 형식을 확인하거나 다시 시도해주세요.\n\n' + text.slice(0, 200));
-        return;
-      }
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "파일 업로드 실패");
-        return;
-      }
-      setAttachedFile({ name: data.filename, text: data.text });
+      const result = await extractTextFromFile(file);
+      setAttachedFile({ name: result.filename, text: result.text });
     } catch (err) {
-      setError('파일 업로드 중 오류가 발생했습니다.\n\n가능한 원인:\n• 파일이 손상되었거나 암호로 보호됨\n• 파일 크기가 너무 큼\n• 네트워크 연결 문제\n\n다른 파일로 다시 시도해주세요.');
+      setError(err instanceof Error ? err.message : '파일 처리 중 오류가 발생했습니다.');
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
