@@ -111,55 +111,118 @@ async function extractPdf(file: File): Promise<string> {
   return texts.join('\n\n');
 }
 
-/** PPT(구형) → 텍스트 (브라우저, CFB) */
+/** PPT(구형) → 텍스트 (브라우저, CFB + 멀티 전략) */
 async function extractPpt(file: File): Promise<string> {
   const CFB = await import('cfb');
   const buffer = new Uint8Array(await file.arrayBuffer());
   const cfb = CFB.read(buffer, { type: "array" });
+
+  // 전략 1: PowerPoint Document 스트림의 TextAtom 파싱
   const entry =
     CFB.find(cfb, "/PowerPoint Document") ||
     CFB.find(cfb, "PowerPoint Document");
-  if (!entry || !entry.content) {
-    throw new Error('PPT 파일에서 텍스트를 추출할 수 없습니다.\n\n.pptx로 변환 후 다시 시도해주세요.');
+
+  let texts: string[] = [];
+
+  if (entry?.content) {
+    texts = parsePptRecords(entry.content);
   }
 
-  const raw = entry.content;
-  const texts: string[] = [];
-  let i = 0;
-  while (i < raw.length - 8) {
-    const recType = raw[i + 2] | (raw[i + 3] << 8);
-    const recLen = raw[i + 4] | (raw[i + 5] << 8) | (raw[i + 6] << 16) | (raw[i + 7] << 24);
-
-    if (recType === 0x0fa0 && recLen > 0 && recLen < 100000) {
-      // TextCharsAtom — UTF-16LE
-      const end = Math.min(i + 8 + recLen, raw.length);
-      const bytes = raw.slice(i + 8, end);
-      let str = '';
-      for (let j = 0; j < bytes.length - 1; j += 2) {
-        str += String.fromCharCode(bytes[j] | (bytes[j + 1] << 8));
-      }
-      str = str.trim();
-      if (str && !/^[\x00-\x1F]+$/.test(str)) texts.push(str);
-    } else if (recType === 0x0fa8 && recLen > 0 && recLen < 100000) {
-      // TextBytesAtom — Latin1
-      const end = Math.min(i + 8 + recLen, raw.length);
-      const bytes = raw.slice(i + 8, end);
-      let str = '';
-      for (let j = 0; j < bytes.length; j++) {
-        str += String.fromCharCode(bytes[j]);
-      }
-      str = str.trim();
-      if (str && !/^[\x00-\x1F]+$/.test(str)) texts.push(str);
+  // 전략 2: Current User 외 모든 스트림에서 TextAtom 탐색
+  if (!texts.length) {
+    for (const fe of cfb.FileIndex) {
+      if (!fe.content || fe.name === 'Current User' || fe.name === '\u0005DocumentSummaryInformation' || fe.name === '\u0005SummaryInformation') continue;
+      const found = parsePptRecords(fe.content);
+      if (found.length > texts.length) texts = found;
     }
+  }
 
-    i += 8 + recLen;
-    if (recLen === 0) i += 1;
+  // 전략 3: 바이너리 전체에서 UTF-16LE 텍스트 직접 추출 (한글 포함)
+  if (!texts.length) {
+    texts = extractUnicodeStrings(buffer);
   }
 
   if (!texts.length) {
     throw new Error('PPT 파일에서 텍스트를 추출할 수 없습니다.\n\n.pptx로 변환 후 다시 시도해주세요.');
   }
   return texts.join('\n\n');
+}
+
+/** PPT 레코드에서 TextCharsAtom/TextBytesAtom 추출 */
+function parsePptRecords(raw: Uint8Array | number[]): string[] {
+  const texts: string[] = [];
+  let i = 0;
+  const len = raw.length;
+  while (i < len - 8) {
+    const recType = raw[i + 2] | (raw[i + 3] << 8);
+    const recLen = raw[i + 4] | (raw[i + 5] << 8) | (raw[i + 6] << 16) | (raw[i + 7] << 24);
+
+    if (recLen < 0 || recLen > 10000000) { i += 1; continue; }
+
+    if (recType === 0x0fa0 && recLen > 0 && recLen < 200000) {
+      // TextCharsAtom — UTF-16LE (한글 등 유니코드)
+      const end = Math.min(i + 8 + recLen, len);
+      let str = '';
+      for (let j = i + 8; j < end - 1; j += 2) {
+        str += String.fromCharCode(raw[j] | (raw[j + 1] << 8));
+      }
+      str = str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+      if (str.length > 1) texts.push(str);
+    } else if (recType === 0x0fa8 && recLen > 0 && recLen < 200000) {
+      // TextBytesAtom — Latin1/ASCII
+      const end = Math.min(i + 8 + recLen, len);
+      let str = '';
+      for (let j = i + 8; j < end; j++) {
+        str += String.fromCharCode(raw[j]);
+      }
+      str = str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+      if (str.length > 1) texts.push(str);
+    }
+
+    i += 8 + recLen;
+    if (recLen === 0) i += 1;
+  }
+  return texts;
+}
+
+/** 바이너리에서 UTF-16LE 유니코드 문자열 직접 추출 (한글/CJK 포함) */
+function extractUnicodeStrings(raw: Uint8Array): string[] {
+  const texts: string[] = [];
+  const len = raw.length;
+  let current = '';
+  
+  for (let i = 0; i < len - 1; i += 2) {
+    const code = raw[i] | (raw[i + 1] << 8);
+    // 출력 가능한 문자: 공백, ASCII 가시문자, 한글(AC00-D7AF), CJK, 일본어 등
+    const isPrintable = 
+      code === 0x0A || code === 0x0D || // 줄바꿈
+      (code >= 0x20 && code <= 0x7E) || // ASCII
+      (code >= 0xAC00 && code <= 0xD7AF) || // 한글 음절
+      (code >= 0x3131 && code <= 0x318E) || // 한글 자모
+      (code >= 0x4E00 && code <= 0x9FFF) || // CJK
+      (code >= 0x3040 && code <= 0x30FF) || // 히라가나/카타카나
+      (code >= 0x00A0 && code <= 0x024F) || // Latin Extended
+      (code >= 0x2000 && code <= 0x206F) || // 일반 구두점
+      (code >= 0xFF01 && code <= 0xFF5E);   // 전각
+      
+    if (isPrintable) {
+      current += String.fromCharCode(code);
+    } else {
+      if (current.trim().length >= 4) {
+        // 최소 4자 이상, 한글이나 의미있는 텍스트가 포함된 경우만
+        const trimmed = current.trim();
+        if (/[가-힣a-zA-Z]/.test(trimmed)) {
+          texts.push(trimmed);
+        }
+      }
+      current = '';
+    }
+  }
+  if (current.trim().length >= 4 && /[가-힣a-zA-Z]/.test(current.trim())) {
+    texts.push(current.trim());
+  }
+  
+  return texts;
 }
 
 /** 서버 폴백 (미지원 형식 등) */
