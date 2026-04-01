@@ -11,7 +11,7 @@ interface TopicInputProps {
 
 export default function TopicInput({ workflowId }: TopicInputProps) {
   const [input, setInput] = useState("");
-  const [attachedFile, setAttachedFile] = useState<{ name: string; text: string } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<{ name: string; text: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { isStreaming, setTopic, addMessage, updateLastMessage, finishAgent, setStreaming, setActiveAgent, reset } =
@@ -23,15 +23,29 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
   }, [activeWorkflow.id, activeWorkflow.prompt]);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const incoming = Array.from(files);
+    if (attachedFiles.length + incoming.length > 5) {
+      alert('최대 5개 파일까지 첨부할 수 있습니다.');
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
 
     setUploading(true);
     try {
-      const result = await extractTextFromFile(file);
-      setAttachedFile({ name: result.filename, text: result.text });
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '파일 처리 중 오류가 발생했습니다.');
+      const results: { name: string; text: string }[] = [];
+      const errors: string[] = [];
+      for (const file of incoming) {
+        try {
+          const result = await extractTextFromFile(file);
+          results.push({ name: result.filename, text: result.text });
+        } catch (err) {
+          errors.push(err instanceof Error ? `${file.name}: ${err.message}` : `${file.name}: 처리 실패`);
+        }
+      }
+      if (results.length > 0) setAttachedFiles((prev) => [...prev, ...results]);
+      if (errors.length > 0) alert(errors.join('\n'));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -41,18 +55,18 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = input.trim();
-    if ((!trimmed && !attachedFile) || isStreaming) return;
+    if ((!trimmed && attachedFiles.length === 0) || isStreaming) return;
 
     reset();
 
     // 토픽 구성: 텍스트 + 첨부파일
     let fullTopic = trimmed;
-    if (attachedFile) {
-      const fileSection = `\n\n---\n[첨부파일: ${attachedFile.name}]\n${attachedFile.text}`;
-      fullTopic = trimmed ? trimmed + fileSection : `첨부파일 분석 요청\n${fileSection}`;
+    if (attachedFiles.length > 0) {
+      const fileSections = attachedFiles.map((f) => `\n\n---\n[첨부파일: ${f.name}]\n${f.text}`).join('');
+      fullTopic = trimmed ? trimmed + fileSections : `첨부파일 분석 요청${fileSections}`;
     }
 
-    setTopic(trimmed || attachedFile?.name || "첨부파일 점검");
+    setTopic(trimmed || attachedFiles[0]?.name || "첨부파일 점검");
     setStreaming(true);
 
     try {
@@ -102,7 +116,7 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
     } finally {
       setStreaming(false);
       setActiveAgent(null);
-      setAttachedFile(null);
+      setAttachedFiles([]);
     }
   }
 
@@ -140,8 +154,8 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              attachedFile
-                ? `📎 ${attachedFile.name} 첨부됨 — 어떤 점을 검토할지 한 줄로 적어주세요`
+              attachedFiles.length > 0
+                ? `📎 ${attachedFiles.length}개 파일 첨부됨 — 어떤 점을 검토할지 한 줄로 적어주세요`
                 : activeWorkflow.prompt
             }
             disabled={isStreaming}
@@ -169,6 +183,7 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
           <input
             ref={fileRef}
             type="file"
+            multiple
             accept=".pdf,.docx,.pptx,.ppt,.txt,.md,.csv"
             onChange={handleFileChange}
             className="hidden"
@@ -176,7 +191,7 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
         </div>
         <button
           type="submit"
-          disabled={isStreaming || (!input.trim() && !attachedFile)}
+          disabled={isStreaming || (!input.trim() && attachedFiles.length === 0)}
           className="rounded-xl bg-omega px-6 py-3.5 font-semibold text-white transition-all hover:bg-omega/80 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isStreaming ? (
@@ -190,21 +205,25 @@ export default function TopicInput({ workflowId }: TopicInputProps) {
         </button>
       </div>
       {/* 첨부파일 표시 */}
-      {attachedFile && !isStreaming && (
-        <div className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--bg-secondary)] px-3 py-2 text-sm">
-          <span>📎</span>
-          <span className="text-[var(--text-primary)]">{attachedFile.name}</span>
-          <span className="text-[var(--text-secondary)]">({(attachedFile.text.length / 1000).toFixed(1)}K자)</span>
-          <button
-            type="button"
-            onClick={() => setAttachedFile(null)}
-            className="ml-auto text-[var(--text-secondary)] hover:text-red-400 transition-colors"
-          >
-            ✕
-          </button>
+      {attachedFiles.length > 0 && !isStreaming && (
+        <div className="mt-2 space-y-1">
+          <div className="text-xs text-[var(--text-secondary)]">📎 {attachedFiles.length}개 파일 첨부됨</div>
+          {attachedFiles.map((f, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg bg-[var(--bg-secondary)] px-3 py-2 text-sm">
+              <span className="text-[var(--text-primary)]">{f.name}</span>
+              <span className="text-[var(--text-secondary)]">({(f.text.length / 1000).toFixed(1)}K자)</span>
+              <button
+                type="button"
+                onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}
+                className="ml-auto text-[var(--text-secondary)] hover:text-red-400 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       )}
-      {!attachedFile && (
+      {attachedFiles.length === 0 && (
         <p className="mt-2 text-xs text-[var(--text-secondary)]">
           지원 형식: PDF, DOCX, TXT, MD, CSV. 파일만 업로드해도 에이전트가 문맥을 읽고 점검합니다.
         </p>

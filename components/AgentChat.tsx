@@ -39,7 +39,7 @@ export default function AgentChat({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [attachedFile, setAttachedFile] = useState<{ name: string; text: string } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<{ name: string; text: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-5-20250929");
   const [chatId, setChatId] = useState<string>(sessionId || Math.random().toString(36).slice(2) + Date.now().toString(36));
@@ -67,7 +67,7 @@ export default function AgentChat({
       setChatId(newId);
       setMessages([]);
       setInput(initialPrompt || "");
-      setAttachedFile(null);
+      setAttachedFiles([]);
       onNewSession(newId);
     }
   }, [agentId, initialPrompt, onNewSession, sessionId]);
@@ -85,33 +85,47 @@ export default function AgentChat({
   if (!agent) return null;
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const incoming = Array.from(files);
+    if (attachedFiles.length + incoming.length > 5) {
+      alert('최대 5개 파일까지 첨부할 수 있습니다.');
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setUploading(true);
     try {
-      const result = await extractTextFromFile(file);
-      setAttachedFile({ name: result.filename, text: result.text });
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '파일 처리 중 오류가 발생했습니다.');
+      const results: { name: string; text: string }[] = [];
+      const errors: string[] = [];
+      for (const file of incoming) {
+        try {
+          const result = await extractTextFromFile(file);
+          results.push({ name: result.filename, text: result.text });
+        } catch (err) {
+          errors.push(err instanceof Error ? `${file.name}: ${err.message}` : `${file.name}: 처리 실패`);
+        }
+      }
+      if (results.length > 0) setAttachedFiles((prev) => [...prev, ...results]);
+      if (errors.length > 0) alert(errors.join('\n'));
     } finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
   }
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = input.trim();
-    if ((!trimmed && !attachedFile) || streaming) return;
+    if ((!trimmed && attachedFiles.length === 0) || streaming) return;
 
     let userContent = trimmed;
-    if (attachedFile) {
-      const fileSection = `\n\n---\n[첨부파일: ${attachedFile.name}]\n${attachedFile.text}`;
-      userContent = trimmed ? trimmed + fileSection : `첨부파일 분석 요청\n${fileSection}`;
+    if (attachedFiles.length > 0) {
+      const fileSections = attachedFiles.map((f) => `\n\n---\n[첨부파일: ${f.name}]\n${f.text}`).join('');
+      userContent = trimmed ? trimmed + fileSections : `첨부파일 분석 요청${fileSections}`;
     }
 
     const userMsg: ChatMessage = { role: "user", content: userContent };
     const newMessages = [...messages, userMsg];
     setMessages([...newMessages, { role: "assistant", content: "" }]);
     setInput("");
-    setAttachedFile(null);
+    setAttachedFiles([]);
     setStreaming(true);
 
     let fullContent = "";
@@ -275,19 +289,23 @@ export default function AgentChat({
             {selectedModel.includes("sonnet") ? "빠르고 효율적인 일반 리뷰" : "깊고 정밀한 최종 검증 🔓"}
           </span>
         </div>
-        {attachedFile && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg bg-[var(--bg-secondary)] px-3 py-2 text-sm">
-            <span>📎</span>
-            <span className="text-[var(--text-primary)]">{attachedFile.name}</span>
-            <span className="text-[var(--text-secondary)]">({(attachedFile.text.length / 1000).toFixed(1)}K자)</span>
-            <button type="button" onClick={() => setAttachedFile(null)}
-              className="ml-auto text-[var(--text-secondary)] hover:text-red-400 transition-colors">✕</button>
+        {attachedFiles.length > 0 && (
+          <div className="mb-2 space-y-1">
+            <div className="text-xs text-[var(--text-secondary)]">📎 {attachedFiles.length}개 파일 첨부됨</div>
+            {attachedFiles.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 rounded-lg bg-[var(--bg-secondary)] px-3 py-2 text-sm">
+                <span className="text-[var(--text-primary)]">{f.name}</span>
+                <span className="text-[var(--text-secondary)]">({(f.text.length / 1000).toFixed(1)}K자)</span>
+                <button type="button" onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}
+                  className="ml-auto text-[var(--text-secondary)] hover:text-red-400 transition-colors">✕</button>
+              </div>
+            ))}
           </div>
         )}
         <div className="flex gap-3">
           <div className="relative flex-1">
             <input type="text" value={input} onChange={(e) => setInput(e.target.value)}
-              placeholder={attachedFile ? `📎 ${attachedFile.name} 첨부됨` : inputPlaceholder || `${agent.name}에게 어떤 점을 검토받을지 적어주세요`}
+              placeholder={attachedFiles.length > 0 ? `📎 ${attachedFiles.length}개 파일 첨부됨` : inputPlaceholder || `${agent.name}에게 어떤 점을 검토받을지 적어주세요`}
               disabled={streaming}
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-3 pr-12 text-[var(--text-primary)] placeholder-[var(--text-secondary)] outline-none focus:border-omega focus:ring-1 focus:ring-omega/50 disabled:opacity-50" />
             <button type="button" onClick={() => fileRef.current?.click()} disabled={streaming || uploading}
@@ -304,9 +322,9 @@ export default function AgentChat({
                 </svg>
               )}
             </button>
-            <input ref={fileRef} type="file" accept=".pdf,.docx,.pptx,.ppt,.txt,.md,.csv" onChange={handleFileChange} className="hidden" />
+            <input ref={fileRef} type="file" multiple accept=".pdf,.docx,.pptx,.ppt,.txt,.md,.csv" onChange={handleFileChange} className="hidden" />
           </div>
-          <button type="submit" disabled={streaming || (!input.trim() && !attachedFile)}
+          <button type="submit" disabled={streaming || (!input.trim() && attachedFiles.length === 0)}
             className="rounded-xl px-5 py-3 font-semibold text-white transition-all hover:opacity-80 disabled:opacity-40"
             style={{ backgroundColor: agent.color }}>
             {streaming ? "..." : "리뷰 요청"}

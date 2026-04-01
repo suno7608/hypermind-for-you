@@ -10,7 +10,7 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
   const [input, setInput] = useState("");
   const [password, setPassword] = useState("");
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-5-20250929");
-  const [attachedFile, setAttachedFile] = useState<{ name: string; text: string } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<{ name: string; text: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -18,17 +18,31 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
     useDebateStore();
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    const incoming = Array.from(files);
+    if (attachedFiles.length + incoming.length > 5) {
+      setError('최대 5개 파일까지 첨부할 수 있습니다.');
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
 
     setUploading(true);
     setError(null);
 
     try {
-      const result = await extractTextFromFile(file);
-      setAttachedFile({ name: result.filename, text: result.text });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '파일 처리 중 오류가 발생했습니다.');
+      const results: { name: string; text: string }[] = [];
+      const errors: string[] = [];
+      for (const file of incoming) {
+        try {
+          const result = await extractTextFromFile(file);
+          results.push({ name: result.filename, text: result.text });
+        } catch (err) {
+          errors.push(err instanceof Error ? `${file.name}: ${err.message}` : `${file.name}: 처리 실패`);
+        }
+      }
+      if (results.length > 0) setAttachedFiles((prev) => [...prev, ...results]);
+      if (errors.length > 0) setError(errors.join('\n'));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -39,7 +53,7 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
     event.preventDefault();
     const trimmed = input.trim();
 
-    if ((!trimmed && !attachedFile) || isStreaming) return;
+    if ((!trimmed && attachedFiles.length === 0) || isStreaming) return;
     if (!password.trim()) {
       setError("최종 검증 비밀번호를 입력하세요.");
       return;
@@ -49,12 +63,12 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
     setError(null);
 
     let fullTopic = trimmed;
-    if (attachedFile) {
-      const fileSection = `\n\n---\n[첨부파일: ${attachedFile.name}]\n${attachedFile.text}`;
-      fullTopic = trimmed ? trimmed + fileSection : `첨부파일 기반 최종 검증 요청\n${fileSection}`;
+    if (attachedFiles.length > 0) {
+      const fileSections = attachedFiles.map((f) => `\n\n---\n[첨부파일: ${f.name}]\n${f.text}`).join('');
+      fullTopic = trimmed ? trimmed + fileSections : `첨부파일 기반 최종 검증 요청${fileSections}`;
     }
 
-    setTopic(trimmed || attachedFile?.name || "Council 최종 검증");
+    setTopic(trimmed || attachedFiles[0]?.name || "Council 최종 검증");
     setStreaming(true);
 
     try {
@@ -187,8 +201,8 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder={
-              attachedFile
-                ? `📎 ${attachedFile.name} 첨부됨 — 최종 검증에서 확인할 쟁점을 적어주세요`
+              attachedFiles.length > 0
+                ? `📎 ${attachedFiles.length}개 파일 첨부됨 — 최종 검증에서 확인할 쟁점을 적어주세요`
                 : "예: 이 발표 자료를 최종 검증해줘. 반박 가능성과 빠진 근거를 중심으로 봐줘"
             }
             disabled={isStreaming}
@@ -215,6 +229,7 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
           <input
             ref={fileRef}
             type="file"
+            multiple
             accept=".pdf,.docx,.pptx,.ppt,.txt,.md,.csv"
             onChange={handleFileChange}
             className="hidden"
@@ -222,25 +237,29 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
         </div>
         <button
           type="submit"
-          disabled={isStreaming || (!input.trim() && !attachedFile) || !password.trim()}
+          disabled={isStreaming || (!input.trim() && attachedFiles.length === 0) || !password.trim()}
           className="brand-button justify-center disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isStreaming ? "Council 검증 중..." : "Council 최종 검증 시작"}
         </button>
       </div>
 
-      {attachedFile && !isStreaming && (
-        <div className="flex items-center gap-2 rounded-2xl bg-[var(--bg-secondary)] px-4 py-3 text-sm">
-          <span>📎</span>
-          <span className="text-[var(--text-primary)]">{attachedFile.name}</span>
-          <span className="text-[var(--text-secondary)]">({(attachedFile.text.length / 1000).toFixed(1)}K자)</span>
-          <button
-            type="button"
-            onClick={() => setAttachedFile(null)}
-            className="ml-auto text-[var(--text-secondary)] transition-colors hover:text-red-500"
-          >
-            ✕
-          </button>
+      {attachedFiles.length > 0 && !isStreaming && (
+        <div className="space-y-1">
+          <div className="text-xs text-[var(--text-secondary)]">📎 {attachedFiles.length}개 파일 첨부됨</div>
+          {attachedFiles.map((f, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-2xl bg-[var(--bg-secondary)] px-4 py-3 text-sm">
+              <span className="text-[var(--text-primary)]">{f.name}</span>
+              <span className="text-[var(--text-secondary)]">({(f.text.length / 1000).toFixed(1)}K자)</span>
+              <button
+                type="button"
+                onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}
+                className="ml-auto text-[var(--text-secondary)] transition-colors hover:text-red-500"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
