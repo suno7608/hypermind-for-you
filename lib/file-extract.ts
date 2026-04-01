@@ -31,12 +31,9 @@ export async function extractTextFromFile(file: File): Promise<{ text: string; f
   else if (name.endsWith('.pdf')) {
     text = await extractPdf(file);
   }
-  // PPT(구형): 서버 폴백 (4MB 제한)
+  // PPT(구형): CFB로 브라우저에서 직접 처리
   else if (name.endsWith('.ppt')) {
-    if (file.size > 4 * 1024 * 1024) {
-      throw new Error('구형 PPT 파일이 4MB를 초과합니다.\n\nPowerPoint에서 .pptx로 다시 저장하면 크기 제한 없이 업로드 가능합니다.');
-    }
-    return await uploadToServer(file);
+    text = await extractPpt(file);
   }
   else {
     throw new Error(`지원하지 않는 형식입니다: ${name.split('.').pop()}\n\n지원: PDF, PPTX, DOCX, PPT, TXT, MD, CSV`);
@@ -114,7 +111,58 @@ async function extractPdf(file: File): Promise<string> {
   return texts.join('\n\n');
 }
 
-/** 서버 폴백 (구형 PPT 등) */
+/** PPT(구형) → 텍스트 (브라우저, CFB) */
+async function extractPpt(file: File): Promise<string> {
+  const CFB = await import('cfb');
+  const buffer = new Uint8Array(await file.arrayBuffer());
+  const cfb = CFB.read(buffer, { type: "array" });
+  const entry =
+    CFB.find(cfb, "/PowerPoint Document") ||
+    CFB.find(cfb, "PowerPoint Document");
+  if (!entry || !entry.content) {
+    throw new Error('PPT 파일에서 텍스트를 추출할 수 없습니다.\n\n.pptx로 변환 후 다시 시도해주세요.');
+  }
+
+  const raw = entry.content;
+  const texts: string[] = [];
+  let i = 0;
+  while (i < raw.length - 8) {
+    const recType = raw[i + 2] | (raw[i + 3] << 8);
+    const recLen = raw[i + 4] | (raw[i + 5] << 8) | (raw[i + 6] << 16) | (raw[i + 7] << 24);
+
+    if (recType === 0x0fa0 && recLen > 0 && recLen < 100000) {
+      // TextCharsAtom — UTF-16LE
+      const end = Math.min(i + 8 + recLen, raw.length);
+      const bytes = raw.slice(i + 8, end);
+      let str = '';
+      for (let j = 0; j < bytes.length - 1; j += 2) {
+        str += String.fromCharCode(bytes[j] | (bytes[j + 1] << 8));
+      }
+      str = str.trim();
+      if (str && !/^[\x00-\x1F]+$/.test(str)) texts.push(str);
+    } else if (recType === 0x0fa8 && recLen > 0 && recLen < 100000) {
+      // TextBytesAtom — Latin1
+      const end = Math.min(i + 8 + recLen, raw.length);
+      const bytes = raw.slice(i + 8, end);
+      let str = '';
+      for (let j = 0; j < bytes.length; j++) {
+        str += String.fromCharCode(bytes[j]);
+      }
+      str = str.trim();
+      if (str && !/^[\x00-\x1F]+$/.test(str)) texts.push(str);
+    }
+
+    i += 8 + recLen;
+    if (recLen === 0) i += 1;
+  }
+
+  if (!texts.length) {
+    throw new Error('PPT 파일에서 텍스트를 추출할 수 없습니다.\n\n.pptx로 변환 후 다시 시도해주세요.');
+  }
+  return texts.join('\n\n');
+}
+
+/** 서버 폴백 (미지원 형식 등) */
 async function uploadToServer(file: File): Promise<{ text: string; filename: string }> {
   const form = new FormData();
   form.append('file', file);
