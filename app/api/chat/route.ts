@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       try {
         const stream = client.messages.stream({
           model: modelName,
-          max_tokens: 16384,
+          max_tokens: 8192,
           system: `${agent.systemPrompt}\n${REVIEW_CONTEXT}`,
           messages: messages.map((m: { role: string; content: string }) => ({
             role: m.role,
