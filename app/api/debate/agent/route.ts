@@ -35,8 +35,21 @@ function buildPrompt(agentId: string, topic: string, prev: Record<string, string
   return `${REVIEW_CONTEXT}\n\n[검토 대상 요약]\n${truncate(topic, 6000)}\n\n[Arbiter의 종합 권고안]\n${truncate(prev["arbiter"], 10000)}\n\n위 결과를 9차원으로 검증해주세요.\n발표 또는 공유 전에 남아 있는 리스크와 추가 수정 사항을 분명하게 알려주세요.`;
 }
 
+type ImagePayload = { base64: string; mimeType: string };
+
+function buildMessageContent(prompt: string, images?: ImagePayload[]) {
+  if (!images || images.length === 0) return prompt;
+  return [
+    ...images.map((img) => ({
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: img.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp", data: img.base64 },
+    })),
+    { type: "text" as const, text: prompt },
+  ];
+}
+
 export async function POST(req: NextRequest) {
-  const { agentId, topic, prev, password, model } = await req.json();
+  const { agentId, topic, prev, password, model, images } = await req.json();
   const modelName = resolveModel(model);
 
   const councilAccessPassword = process.env.COUNCIL_ACCESS_PASSWORD;
@@ -64,7 +77,7 @@ export async function POST(req: NextRequest) {
           model: modelName,
           max_tokens: 8192,
           system: agent.systemPrompt,
-          messages: [{ role: "user", content: userPrompt }],
+          messages: [{ role: "user", content: buildMessageContent(userPrompt, agentId === "omega" ? images : undefined) }],
         });
         for await (const event of stream) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {

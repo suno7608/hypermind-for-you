@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useDebateStore } from "@/lib/store";
-import { extractTextFromFile } from "@/lib/file-extract";
+import { processFile, type ProcessedFile } from "@/lib/file-extract";
 
 const AGENT_ORDER = ["omega", "psi", "arbiter", "delta"];
 
@@ -10,7 +10,7 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
   const [input, setInput] = useState("");
   const [password, setPassword] = useState("");
   const [selectedModel, setSelectedModel] = useState("claude-sonnet-4-5-20250929");
-  const [attachedFiles, setAttachedFiles] = useState<{ name: string; text: string }[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<ProcessedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -31,12 +31,11 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
     setError(null);
 
     try {
-      const results: { name: string; text: string }[] = [];
+      const results: ProcessedFile[] = [];
       const errors: string[] = [];
       for (const file of incoming) {
         try {
-          const result = await extractTextFromFile(file);
-          results.push({ name: result.filename, text: result.text });
+          results.push(await processFile(file));
         } catch (err) {
           errors.push(err instanceof Error ? `${file.name}: ${err.message}` : `${file.name}: 처리 실패`);
         }
@@ -62,17 +61,22 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
     reset();
     setError(null);
 
+    const textFiles = attachedFiles.filter((f): f is ProcessedFile & { type: "text" } => f.type === "text");
+    const imageFiles = attachedFiles.filter((f): f is ProcessedFile & { type: "image" } => f.type === "image");
+
     let fullTopic = trimmed;
-    if (attachedFiles.length > 0) {
-      const fileSections = attachedFiles.map((f) => `\n\n---\n[첨부파일: ${f.name}]\n${f.text}`).join('');
+    if (textFiles.length > 0) {
+      const fileSections = textFiles.map((f) => `\n\n---\n[첨부파일: ${f.name}]\n${f.text}`).join('');
       fullTopic = trimmed ? trimmed + fileSections : `첨부파일 기반 최종 검증 요청${fileSections}`;
+    }
+    if (!trimmed && textFiles.length === 0 && imageFiles.length > 0) {
+      fullTopic = `첨부 이미지(${imageFiles.map(f => f.name).join(', ')})를 분석하고 점검해주세요.`;
     }
 
     setTopic(trimmed || attachedFiles[0]?.name || "Council 최종 검증");
     setStreaming(true);
 
     try {
-      // Call each agent individually to stay within Vercel 60s timeout
       const prev: Record<string, string> = {};
 
       for (const agentId of AGENT_ORDER) {
@@ -82,7 +86,10 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
         const res = await fetch("/api/debate/agent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ agentId, topic: fullTopic, prev, password, model: selectedModel }),
+          body: JSON.stringify({
+            agentId, topic: fullTopic, prev, password, model: selectedModel,
+            ...(imageFiles.length > 0 ? { images: imageFiles.map(f => ({ base64: f.base64, mimeType: f.mimeType })) } : {}),
+          }),
         });
 
         if (!res.ok) {
@@ -126,7 +133,6 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
         setActiveAgent(null);
       }
 
-      // Save to DB via the original debate endpoint (quick, non-streaming)
       try {
         await fetch("/api/debate", {
           method: "POST",
@@ -143,6 +149,8 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
       setActiveAgent(null);
     }
   }
+
+  const hasImages = attachedFiles.some(f => f.type === "image");
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -202,7 +210,7 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
             onChange={(event) => setInput(event.target.value)}
             placeholder={
               attachedFiles.length > 0
-                ? `📎 ${attachedFiles.length}개 파일 첨부됨 — 최종 검증에서 확인할 쟁점을 적어주세요`
+                ? `${hasImages ? "🖼️" : "📎"} ${attachedFiles.length}개 파일 첨부됨 — 최종 검증에서 확인할 쟁점을 적어주세요`
                 : "예: 이 발표 자료를 최종 검증해줘. 반박 가능성과 빠진 근거를 중심으로 봐줘"
             }
             disabled={isStreaming}
@@ -213,7 +221,7 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
             onClick={() => fileRef.current?.click()}
             disabled={isStreaming || uploading}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)] transition-colors hover:text-[var(--accent)] disabled:opacity-30"
-            title="파일 첨부"
+            title="파일/이미지 첨부"
           >
             {uploading ? (
               <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -230,9 +238,9 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
             ref={fileRef}
             type="file"
             multiple
-            accept=".pdf,.docx,.pptx,.ppt,.txt,.md,.csv"
+            accept="image/*,.heic,.heif,.pdf,.docx,.pptx,.ppt,.txt,.md,.csv"
             onChange={handleFileChange}
-            className="hidden"
+            className="sr-only"
           />
         </div>
         <button
@@ -246,11 +254,23 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
 
       {attachedFiles.length > 0 && !isStreaming && (
         <div className="space-y-1">
-          <div className="text-xs text-[var(--text-secondary)]">📎 {attachedFiles.length}개 파일 첨부됨</div>
+          <div className="text-xs text-[var(--text-secondary)]">
+            {hasImages ? "🖼️" : "📎"} {attachedFiles.length}개 파일 첨부됨
+          </div>
           {attachedFiles.map((f, i) => (
             <div key={i} className="flex items-center gap-2 rounded-2xl bg-[var(--bg-secondary)] px-4 py-3 text-sm">
+              <span>{f.type === "image" ? "🖼️" : "📎"}</span>
               <span className="text-[var(--text-primary)]">{f.name}</span>
-              <span className="text-[var(--text-secondary)]">({(f.text.length / 1000).toFixed(1)}K자)</span>
+              {f.type === "text" && (
+                <span className="text-[var(--text-secondary)]">({(f.text.length / 1000).toFixed(1)}K자)</span>
+              )}
+              {f.type === "image" && (
+                <img
+                  src={`data:${f.mimeType};base64,${f.base64}`}
+                  alt={f.name}
+                  className="h-10 w-10 rounded-lg object-cover"
+                />
+              )}
               <button
                 type="button"
                 onClick={() => setAttachedFiles((prev) => prev.filter((_, j) => j !== i))}

@@ -7,7 +7,6 @@ import { randomUUID } from "crypto";
 
 const AGENT_ORDER = ["omega", "psi", "arbiter", "delta"];
 
-// Truncate long text to stay within context limits
 function truncate(text: string, maxChars: number = 12000): string {
   if (text.length <= maxChars) return text;
   const half = Math.floor(maxChars / 2);
@@ -74,19 +73,27 @@ ${truncate(prev["arbiter"], 10000)}
 발표 또는 공유 전에 남아 있는 리스크와 추가 수정 사항을 분명하게 알려주세요.`;
 }
 
+type ImagePayload = { base64: string; mimeType: string };
+
+function buildMessageContent(prompt: string, images?: ImagePayload[]) {
+  if (!images || images.length === 0) return prompt;
+  return [
+    ...images.map((img) => ({
+      type: "image" as const,
+      source: { type: "base64" as const, media_type: img.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp", data: img.base64 },
+    })),
+    { type: "text" as const, text: prompt },
+  ];
+}
+
 export async function POST(req: NextRequest) {
-  const { topic, password, model, saveOnly, agents, userPin } = await req.json();
+  const { topic, password, model, saveOnly, agents, userPin, images } = await req.json();
   const councilAccessPassword = process.env.COUNCIL_ACCESS_PASSWORD;
 
-  if (!councilAccessPassword) {
-    return new Response(JSON.stringify({ error: "COUNCIL_ACCESS_PASSWORD is not configured" }), { status: 503 });
-  }
-  if (password !== councilAccessPassword) {
-    return new Response(JSON.stringify({ error: "Council final review password is invalid" }), { status: 403 });
-  }
-
-  // Save-only mode: just persist results to DB
   if (saveOnly && agents) {
+    if (!councilAccessPassword || password !== councilAccessPassword) {
+      return new Response(JSON.stringify({ error: "Council final review password is invalid" }), { status: 403 });
+    }
     const debateId = randomUUID();
     try {
       await insertDebate(debateId, topic, agents, userPin);
@@ -94,6 +101,12 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.error("DB save failed:", e);
       return new Response(JSON.stringify({ error: "DB save failed" }), { status: 500 });
+    }
+  }
+
+  if (model && String(model).includes("opus")) {
+    if (!councilAccessPassword || password !== councilAccessPassword) {
+      return new Response(JSON.stringify({ error: "Opus 모델은 비밀번호가 필요합니다." }), { status: 403 });
     }
   }
 
@@ -124,18 +137,11 @@ export async function POST(req: NextRequest) {
           const userPrompt = buildPrompt(agentId, topic, agentOutputs);
           send({ type: "start", agent: agentId, content: "" });
           let fullContent = "";
-          // Earlier agents get more tokens, later ones are more focused
-          const tokenLimits: Record<string, number> = {
-            omega: 8192,
-            psi: 8192,
-            arbiter: 8192,
-            delta: 8192,
-          };
           const stream = client.messages.stream({
             model: modelName,
-            max_tokens: tokenLimits[agentId] || 8192,
+            max_tokens: 8192,
             system: agent.systemPrompt,
-            messages: [{ role: "user", content: userPrompt }],
+            messages: [{ role: "user", content: buildMessageContent(userPrompt, agentId === "omega" ? images : undefined) }],
           });
           for await (const event of stream) {
             if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
