@@ -28,19 +28,7 @@ function isHeic(file: File): boolean {
     file.type === "image/heic" || file.type === "image/heif";
 }
 
-async function processImage(file: File): Promise<{ base64: string; mimeType: string }> {
-  if (file.size > MAX_IMAGE_SIZE) {
-    throw new Error("이미지 크기가 20MB를 초과합니다.");
-  }
-
-  let blob: Blob = file;
-
-  if (isHeic(file)) {
-    const heic2any = (await import("heic2any")).default;
-    const result = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
-    blob = Array.isArray(result) ? result[0] : result;
-  }
-
+function renderToCanvas(blob: Blob): Promise<{ base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
     const img = new Image();
@@ -67,6 +55,30 @@ async function processImage(file: File): Promise<{ base64: string; mimeType: str
     };
     img.src = url;
   });
+}
+
+async function processImage(file: File): Promise<{ base64: string; mimeType: string }> {
+  if (file.size > MAX_IMAGE_SIZE) {
+    throw new Error("이미지 크기가 20MB를 초과합니다.");
+  }
+
+  // iOS Safari can render HEIC natively — try direct Canvas first
+  try {
+    return await renderToCanvas(file);
+  } catch {
+    // Fallback: use heic2any for browsers that can't render HEIC
+    if (isHeic(file)) {
+      try {
+        const heic2any = (await import("heic2any")).default;
+        const result = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
+        const blob = Array.isArray(result) ? result[0] : result;
+        return await renderToCanvas(blob);
+      } catch {
+        throw new Error("HEIC 이미지를 변환할 수 없습니다. 사진 보관함에서 선택해 보세요.");
+      }
+    }
+    throw new Error("이미지를 처리할 수 없습니다.");
+  }
 }
 
 export async function processFile(file: File): Promise<ProcessedFile> {
