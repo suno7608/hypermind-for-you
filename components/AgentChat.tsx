@@ -338,7 +338,7 @@ export default function AgentChat({
                 </svg>
               )}
             </button>
-            <input ref={fileRef} type="file" multiple accept="image/*,.heic,.heif,.pdf,.docx,.pptx,.ppt,.txt,.md,.csv" onChange={handleFileChange} className="sr-only" />
+            <input ref={fileRef} type="file" multiple onChange={handleFileChange} className="sr-only" />
           </div>
           <button type="submit" disabled={streaming || (!input.trim() && attachedFiles.length === 0)}
             className="rounded-xl px-5 py-3 font-semibold text-white transition-all hover:opacity-80 disabled:opacity-40"

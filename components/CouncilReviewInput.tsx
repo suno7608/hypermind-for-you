@@ -238,7 +238,6 @@ export default function CouncilReviewInput({ userPin }: { userPin?: string | nul
             ref={fileRef}
             type="file"
             multiple
-            accept="image/*,.heic,.heif,.pdf,.docx,.pptx,.ppt,.txt,.md,.csv"
             onChange={handleFileChange}
             className="sr-only"
           />
