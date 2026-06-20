@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "better-sqlite3": "^11.7.0",
     "cfb": "^1.2.2",
+    "heic2any": "^0.0.4",
     "mammoth": "^1.11.0",
     "next": "^15.1.0",
     "pdf-parse": "^1.1.1",

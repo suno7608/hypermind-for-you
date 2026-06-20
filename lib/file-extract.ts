@@ -1,10 +1,82 @@
 /**
- * 클라이언트 측 파일 텍스트 추출 — 모든 형식 브라우저에서 직접 처리
- * 크기 제한: 50MB (브라우저 메모리 기준)
+ * 클라이언트 측 파일 처리 — 텍스트 추출 + 이미지 변환
+ * 텍스트: 50MB, 이미지: 20MB
  */
 
+export type ProcessedFile =
+  | { type: "text"; name: string; text: string }
+  | { type: "image"; name: string; base64: string; mimeType: string };
+
 const MAX_CLIENT_SIZE = 50 * 1024 * 1024; // 50MB
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
 const MAX_TEXT_LENGTH = 50000;
+const MAX_IMAGE_DIMENSION = 1568;
+
+const IMAGE_EXTENSIONS = [
+  ".jpg", ".jpeg", ".png", ".gif", ".webp",
+  ".heic", ".heif", ".tiff", ".tif", ".bmp", ".avif", ".svg",
+];
+
+function isImageFile(file: File): boolean {
+  const name = (file.name || "").toLowerCase();
+  return file.type.startsWith("image/") || IMAGE_EXTENSIONS.some(ext => name.endsWith(ext));
+}
+
+function isHeic(file: File): boolean {
+  const name = (file.name || "").toLowerCase();
+  return name.endsWith(".heic") || name.endsWith(".heif") ||
+    file.type === "image/heic" || file.type === "image/heif";
+}
+
+async function processImage(file: File): Promise<{ base64: string; mimeType: string }> {
+  if (file.size > MAX_IMAGE_SIZE) {
+    throw new Error("이미지 크기가 20MB를 초과합니다.");
+  }
+
+  let blob: Blob = file;
+
+  if (isHeic(file)) {
+    const heic2any = (await import("heic2any")).default;
+    const result = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
+    blob = Array.isArray(result) ? result[0] : result;
+  }
+
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+        const ratio = Math.min(MAX_IMAGE_DIMENSION / width, MAX_IMAGE_DIMENSION / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      const base64 = dataUrl.split(",")[1];
+      resolve({ base64, mimeType: "image/jpeg" });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("이미지를 읽을 수 없습니다."));
+    };
+    img.src = url;
+  });
+}
+
+export async function processFile(file: File): Promise<ProcessedFile> {
+  if (isImageFile(file)) {
+    const { base64, mimeType } = await processImage(file);
+    return { type: "image", name: file.name, base64, mimeType };
+  }
+  const { text, filename } = await extractTextFromFile(file);
+  return { type: "text", name: filename, text };
+}
 
 export async function extractTextFromFile(file: File): Promise<{ text: string; filename: string }> {
   const name = file.name.toLowerCase();

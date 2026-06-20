@@ -15,10 +15,11 @@ const REVIEW_CONTEXT = `
 - 바로 적용 가능한 수정 제안
 `;
 
-export async function POST(req: NextRequest) {
-  const { agentId, messages, model, password } = await req.json();
+type ImagePayload = { base64: string; mimeType: string };
 
-  // Opus requires password
+export async function POST(req: NextRequest) {
+  const { agentId, messages, model, password, images } = await req.json();
+
   if (model && model.includes("opus")) {
     const councilPw = process.env.COUNCIL_ACCESS_PASSWORD;
     if (!councilPw || password !== councilPw) {
@@ -40,6 +41,22 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder();
 
+  const apiMessages = messages.map((m: { role: string; content: string }, i: number) => {
+    if (i === messages.length - 1 && m.role === "user" && images?.length > 0) {
+      return {
+        role: m.role,
+        content: [
+          ...images.map((img: ImagePayload) => ({
+            type: "image" as const,
+            source: { type: "base64" as const, media_type: img.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp", data: img.base64 },
+          })),
+          { type: "text" as const, text: m.content },
+        ],
+      };
+    }
+    return { role: m.role, content: m.content };
+  });
+
   const readable = new ReadableStream({
     async start(controller) {
       try {
@@ -47,10 +64,7 @@ export async function POST(req: NextRequest) {
           model: modelName,
           max_tokens: 8192,
           system: `${agent.systemPrompt}\n${REVIEW_CONTEXT}`,
-          messages: messages.map((m: { role: string; content: string }) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: apiMessages,
         });
 
         for await (const event of stream) {
